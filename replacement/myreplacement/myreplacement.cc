@@ -4,6 +4,7 @@
 #include <set>
 #include <vector>
 #include <random>
+#include <iostream>
 
 #include "cache.h"
 
@@ -56,6 +57,7 @@ void generate_sample(std::vector<uint64_t> &ans, uint32_t max){
 void CACHE::initialize_replacement() {
     ::occupancy[this].resize(SAMPLE_SIZE);
     ::last_instr[this].resize(NUM_SET * NUM_WAY);
+    std::fill(::last_instr[this].begin(), ::last_instr[this].end(), 0);
 
     ::loaded[this].resize(NUM_SET * NUM_WAY);
     std::fill(::loaded[this].begin(), ::loaded[this].end(), false);
@@ -92,7 +94,10 @@ uint32_t CACHE::find_victim(uint32_t triggering_cpu, uint64_t instr_id, uint32_t
         }
     }
     if(max_RRIP == MAX_RRIP){
-        return victim;
+        assert(victim != -1);
+        assert((victim >= (int) set_start) && (victim < (int) (set_start + NUM_WAY)));
+        // std::cout << "chose victim " << (uint32_t)(victim - set_start) << std::endl;
+        return (uint32_t)(victim - set_start);
     }
     // max_RRIP is not 7 -> the last instr was predicted as cache friendly. need to detrain if the set is sampled
     bool is_sampled = false;
@@ -103,10 +108,18 @@ uint32_t CACHE::find_victim(uint32_t triggering_cpu, uint64_t instr_id, uint32_t
         }
     }
     if(is_sampled){
+        // std::cout << "find_victim on sampled set " << set << std::endl;
         uint64_t instr = ::last_instr[this][victim];
-        if(::pc_prediction[this][instr] > 0){ ::pc_prediction[this][instr]--; }
+        if(instr != 0){
+            // check that this line was accessed by a previous instruction. If not, probably something like a compulsory miss
+            // on the first access (so the last_instr isn't updated yet). Nothing to detrain.
+            if(::pc_prediction[this][instr] > 0){ ::pc_prediction[this][instr]--; }
+        }
     }
-    return victim;
+    assert(victim != -1);
+    assert((victim >= (int) set_start) && (victim < (int) (set_start + NUM_WAY)));
+    // std::cout << "chose victim " << (uint32_t)(victim - set_start) << std::endl;
+    return (uint32_t)(victim - set_start);
 }   
 
 // Called on each cache hit or cache fill (write)
@@ -119,16 +132,6 @@ void CACHE::update_replacement_state(uint32_t triggering_cpu, uint32_t set, uint
     uint64_t pc_hashed = hash_instr(ip);
     ::last_instr[this][line_id] = pc_hashed;
 
-    bool first_load = true;
-    if(::loaded[this][line_id]){
-        first_load = false; 
-    }
-    ::loaded[this][line_id] = true;
-    if(first_load){
-        // do nothing for the first load
-        return;
-    }
-
     bool is_sampled = false;
     uint32_t sample_id;
     for(size_t i = 0; i < SAMPLE_SIZE; i++){
@@ -140,6 +143,16 @@ void CACHE::update_replacement_state(uint32_t triggering_cpu, uint32_t set, uint
     }
 
     if(is_sampled){
+        // check first if it's the first load
+        bool first_load = true;
+        if(::loaded[this][line_id]){
+            first_load = false; 
+        }
+        ::loaded[this][line_id] = true;
+        if(first_load){
+            // do nothing for the first load
+            return;
+        }
         // run OPTGen
         uint64_t now = ::current_time[this][sample_id];
         size_t idx = now;
@@ -175,7 +188,7 @@ void CACHE::update_replacement_state(uint32_t triggering_cpu, uint32_t set, uint
         ::occupancy[this][sample_id][now] = 0;
         // determine if hit or miss
         bool did_hit = false;
-        if(found_line){
+        if(found_line != -1){
             if(!is_full){
                 did_hit = true;
             }
@@ -188,8 +201,14 @@ void CACHE::update_replacement_state(uint32_t triggering_cpu, uint32_t set, uint
             } else {
                 idx--;
             }
+            int runs = 0;
             while(true){
                 ::occupancy[this][sample_id][idx]++;
+                runs++;
+                if(runs >= 1000){
+                    std::cout << "found_line: " << found_line << std::endl;
+                    assert(false);
+                }
                 if((int) idx == found_line){
                     break;
                 }
