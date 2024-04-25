@@ -212,6 +212,8 @@ void CACHE::update_replacement_state(uint32_t triggering_cpu, uint32_t set, uint
                 ::pc_prediction[this][pc_hashed]--;
             }
         }
+        ::current_time[this][sample_id]++;
+        ::current_time[this][sample_id] %= (NUM_WAY * 8);
     }
 
     uint32_t prediction = ::pc_prediction[this][pc_hashed];
