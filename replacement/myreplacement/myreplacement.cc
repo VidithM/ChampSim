@@ -25,7 +25,7 @@ namespace {
     std::map<CACHE*, std::vector<uint32_t>> pc_prediction;          // Saturating counters for hashed program counters - used for predictions (8 KB)
                                                                     // - if the third bit is a 1 (i.e. values 4-7), cache-friendly, else cache-averse (values 0-3)
 
-    std::map<CACHE*, std::vector<std::vector<uint64_t>>> history;   // history of accesses for sampled sets: used for OPTGen to determine last access time
+    std::map<CACHE*, std::vector<std::vector<int>>> history;        // history of accesses for sampled sets: used for OPTGen to determine last access time
                                                                     // on a line. (65 KB)
     
     std::map<CACHE*, std::vector<uint64_t>> current_time;           // maintains current time in each sampled set (0.5 KB). Used to index into history and
@@ -76,7 +76,9 @@ void CACHE::initialize_replacement() {
     for(size_t i = 0; i < SAMPLE_SIZE; i++){
         ::current_time[this][i] = 0;
         ::occupancy[this][i].resize(NUM_WAY * 8);
+        std::fill(::occupancy[this][i].begin(), ::occupancy[this][i].end(), 0);
         ::history[this][i].resize(NUM_WAY * 8);
+        std::fill(::history[this][i].begin(), ::history[this][i].end(), -1);
     }
 }
 
@@ -164,11 +166,11 @@ void CACHE::update_replacement_state(uint32_t triggering_cpu, uint32_t set, uint
         bool is_full = false;
         int found_line = -1;
         for(int i = 0; i < (int) NUM_WAY * 8; i++){
-            if(::history[this][sample_id][idx] == 0){
-                // no instruction present; reached end of history
+            if(::history[this][sample_id][idx] == -1){
+                // no line present; reached end of history
                 break;
             }
-            if(::history[this][sample_id][idx] == line_id){
+            if(::history[this][sample_id][idx] == (int) line_id){
                 found_line = idx;
             }
             if(::occupancy[this][sample_id][idx] == NUM_WAY){
